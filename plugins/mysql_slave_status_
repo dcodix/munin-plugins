@@ -1,1 +1,89 @@
-/home/dca/OFERTIX/git/sys/scripts/munin/mysql_slave_status_
+#!/bin/sh
+
+## Copyright 2006 Tailrank Inc.  Released under BSD + LGPL licenses.
+#
+# Kevin Burton (burton@tailrank.com)
+#
+# Graphs "seconds behind master" for MySQL replication slaves
+#
+# Modified by Vincent Rivellino <vince at cuz dot cx>
+#  - added config variables
+#  - added checks for Slave SQL Running and Slave IO Running
+# Modified by dcodix <dcodix at gmail dot com>
+#  - added support for using the same script with different mysql ports.
+
+# Parameters:
+#
+#   config
+#
+# Configuration variables
+#
+#   mysqlopts     - Options to pass to mysql
+#   mysql         - Set path to mysql command
+#
+
+port=`basename $0 | sed 's/^mysql_slave_status_//g'`
+if [ "X$port" = "X" ]; then
+        port=3306
+fi
+
+mysqlcommand=$mysql
+if [ "X$mysqlcommand" = "X" ]; then
+	mysqlcommand=mysql
+fi
+
+if [ "X$mysqlopts" != "X" ]; then
+	mysqlcommand="$mysqlcommand $mysqlopts -P $port"
+fi
+
+if [ "$1" = "config" ]; then
+
+	echo "graph_title MySQL Slave Status - $port"
+	echo "graph_vlabel slave status"
+	echo "graph_category mysql"
+
+	echo "seconds_behind_master.label Seconds Behind Master"
+	echo "seconds_behind_master.min 0"
+	echo "seconds_behind_master.type GAUGE"
+	echo "seconds_behind_master.draw AREA"
+
+	exit 0
+fi
+echo $mysqlcommand
+
+slave_io_running=0
+slave_sql_running=0
+seconds_behind_master=NaN
+
+tmpfile="/tmp/.`basename $0`.$port.tmp.$$"
+echo 'SHOW SLAVE STATUS\G' | $mysqlcommand > $tmpfile
+
+OLDIFS=$IFS
+IFS='
+'
+for line in `cat $tmpfile`; do
+	if echo $line | grep -q Slave_IO_Running ; then
+		if echo $line | grep -qi yes; then
+			slave_io_running=1
+		fi
+	fi
+
+	if echo $line | grep -q Slave_SQL_Running ; then
+		if echo $line | grep -qi yes; then
+			slave_sql_running=1
+		fi
+	fi
+
+	if echo $line | grep -q Seconds_Behind_Master ; then
+		seconds_behind_master=`echo $line | grep -oE [0-9]+$`
+	fi
+done
+
+if [ $slave_io_running != 1 -o $slave_sql_running != 1 ]; then
+	seconds_behind_master=NaN
+fi
+
+IFS=$OLDIFS
+rm -f $tmpfile
+
+echo "seconds_behind_master.value $seconds_behind_master"
